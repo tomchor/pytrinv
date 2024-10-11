@@ -18,7 +18,7 @@ n_inversion_tracers = 4
 test_averages = False
 test_propagation = False
 
-average_time = True
+average_time = False
 add_sgs_fluxes = False
 normalize_tracers = True
 #---
@@ -26,10 +26,7 @@ normalize_tracers = True
 #+++ Open dataset
 if __name__ == "__main__": print(f"\nGoing to invert tracers in file {filename}\n")
 xaz = xr.load_dataset(filename, decode_times=False).squeeze()
-#---
-
-#+++ Rename y-averages of b for name consistency
-xaz = xaz.rename(b_yavg="b̄")
+xaz = xaz.rename(b_yavg="b̄") # For consistency with notation
 #---
 
 #+++ Merge fluxes and gradients (of tracers and buoyancy) into tensors
@@ -91,6 +88,17 @@ if add_sgs_fluxes:
     print("Adding τ SGS fluxes")
     xaz["⟨uᵢ′τᵅ′⟩"] += xaz["⟨qᵢτᵅ⟩"]
     xaz["⟨uᵢ′b′⟩"] += xaz["⟨qᵢb⟩"]
+#---
+
+#+++ Clean up dataset
+# These quantities are the only needed to move forward
+xaz = xaz[["τ̄ᵅ", "∇ⱼτ̄ᵅ",
+           "τ̄ᵐ", "∇ⱼτ̄ᵐ",
+           "b̄", "∇ⱼb̄",
+           "⟨uᵢ′τᵅ′⟩",
+           "⟨uᵢ′τᵐ′⟩",
+           "⟨uᵢ′b′⟩",
+          ]]
 #---
 
 #+++ Reshape relevant vectors
