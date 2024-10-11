@@ -7,7 +7,7 @@ from dask.diagnostics import ProgressBar
 import sys
 sys.path.append("..")
 from pytrinv.utils import condense, separate_tracers, concat_tracers_back
-from pytrinv.core import get_transport_tensor
+from pytrinv.core import get_transport_tensor, get_Rij_eigenvalues, reconstruct_buoyancy_fluxes
 from colorama import Fore, Back, Style
 
 #+++ Options
@@ -22,7 +22,6 @@ test_propagation = False
 
 average_time = False
 add_sgs_fluxes = False
-normalize_tracers = True
 #---
 
 #+++ Open dataset
@@ -103,48 +102,9 @@ xaz = xaz[["τ̄ᵅ", "∇ⱼτ̄ᵅ",
           ]]
 #---
 
-xaz = get_transport_tensor(xaz, test_propagation=False)
-
-#+++ Get eigenvalues or Rᵢⱼ
-xaz["eig(Rᵢⱼ)"] = xr.apply_ufunc(np.linalg.eigvals, xaz["Rᵢⱼ"],
-                                 input_core_dims=[["i", "j"]],
-                                 output_core_dims=[["i"]],
-                                 dask = "parallelized",)
-xaz["eig(Rᵢⱼ)"] = xaz["eig(Rᵢⱼ)"].rename(i="k")
-
-#+++ Test
-if test_propagation:
-    print("Test that eigenvalue calculation is correctly propagated")
-    with ProgressBar():
-        A3 = np.linalg.eigvals(xaz["Rᵢⱼ"].sel(**test_sel))
-        B3 = xaz["eig(Rᵢⱼ)"].sel(**test_sel).values
-        assert np.allclose(A3, B3), "Eigenvalue calculation isn't correct"
-        print(Fore.GREEN + f"OK")
-        print(Style.RESET_ALL)
-#---
-#---
-
-#+++ Reconstruct buoyancy fluxes
-xaz["∇ⱼb̄"] = xaz["∇ⱼb̄"].expand_dims(dim=dict(μ=[1])) # Extra dimension is needed by apply_ufunc, for some reason
-xaz["∇ⱼb̄"] = xaz["∇ⱼb̄"].transpose(..., "j", "μ")
-xaz["⟨uᵢ′b′⟩ᵣ"] = -xr.apply_ufunc(np.matmul, xaz["Rᵢⱼ"], xaz["∇ⱼb̄"],
-                                  input_core_dims = [["i", "j"], ["j", "μ"]],
-                                  output_core_dims = [["i", "μ"]],
-                                  dask = "parallelized",)
-
-xaz = xaz.squeeze("μ").drop_vars("μ") # Get rid of μ which is no longer needed
-
-#+++ Test
-if test_propagation:
-    print("Test that buoyancy flux reconstruction is done correctly")
-    with ProgressBar():
-        A4 = -xaz["Rᵢⱼ"].isel(time=0, zC=0, xC=0).values @ xaz["∇ⱼb̄"].isel(time=0, zC=0, xC=0).values
-        B4 =  xaz["⟨uᵢ′b′⟩ᵣ"].isel(time=0, zC=0, xC=0)
-        assert np.allclose(A4, B4.values), "Buoyancy flux reconstruction isn't correct"
-        print(Fore.GREEN + f"OK")
-        print(Style.RESET_ALL)
-#---
-#---
+xaz = get_transport_tensor(xaz, test_propagation=False, normalize_tracers=False)
+xaz = get_Rij_eigenvalues(xaz, test_propagation=False)
+xaz = reconstruct_buoyancy_fluxes(xaz, test_propagation=False)
 
 #+++ Reconstruct passive tracer fluxes
 if n_inversion_tracers: # Put gradients that weren't used in the inversion back
