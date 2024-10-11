@@ -7,18 +7,13 @@ from dask.diagnostics import ProgressBar
 import sys
 sys.path.append("..")
 from pytrinv.utils import condense, separate_tracers, concat_tracers_back
-from pytrinv.core import get_transport_tensor, get_Rij_eigenvalues, reconstruct_buoyancy_fluxes
+from pytrinv.core import get_transport_tensor, get_Rij_eigenvalues, reconstruct_buoyancy_fluxes, reconstruct_tracer_fluxes
 from colorama import Fore, Back, Style
 
 #+++ Options
 filename = "xaz.TEST-f32.nc"
-test_sel = dict(time=10, xC=1e3, zC=-20, method="nearest")
-reduce_dims = ("y",)
-indices = [1, 3]
-n_inversion_tracers = 4
-
-test_averages = False
-test_propagation = False
+indices = [1, 3] # Indices to use when calling `condense()`
+inversion_tracers = range(1, 5) # Tracers to use
 
 average_time = False
 add_sgs_fluxes = False
@@ -60,20 +55,11 @@ xaz = condense(xaz, vlist = natsorted([ v for v in xaz.variables.keys() if (v.st
 xaz = condense(xaz, vlist = natsorted([ v for v in xaz.variables.keys() if (v.startswith("qτ") and v.endswith("z_yavg")) ]), varname="⟨qτᵅ_z⟩", dimname="α")
 
 xaz = condense(xaz, vlist = ["⟨qτᵅ_x⟩", "⟨qτᵅ_z⟩"], varname="⟨qᵢτᵅ⟩", dimname="i", indices=indices)
-
 xaz = condense(xaz, vlist = ["qb_sgs_x_yavg", "qb_sgs_z_yavg"], varname="⟨qᵢb⟩", dimname="i", indices=indices)
 #---
 #---
 
-#+++ Maybe separate tracers into τᵅ and tᵅ
-if (type(n_inversion_tracers) is float) or (type(n_inversion_tracers) is int):
-    if n_inversion_tracers > 0:
-        inversion_tracers = xaz.α[:n_inversion_tracers]
-    elif n_inversion_tracers < 0:
-        inversion_tracers = xaz.α[n_inversion_tracers:]
-    else:
-        inversion_tracers = xaz.α
-
+#+++ Maybe separate tracers into τᵅ and τᵐ
 if not len(xaz.α) == len(inversion_tracers):
     xaz = separate_tracers(xaz, inversion_tracers=inversion_tracers,
                            used_basename="τ", unused_index="m", unused_index_sup="ᵐ")
@@ -92,7 +78,7 @@ if add_sgs_fluxes:
 #---
 
 #+++ Clean up dataset
-# These quantities are the only needed to move forward
+# These quantities are the only needed to move forward (with these specific names)
 xaz = xaz[["τ̄ᵅ", "∇ⱼτ̄ᵅ",
            "τ̄ᵐ", "∇ⱼτ̄ᵐ",
            "b̄", "∇ⱼb̄",
@@ -102,31 +88,9 @@ xaz = xaz[["τ̄ᵅ", "∇ⱼτ̄ᵅ",
           ]]
 #---
 
+# Actual calculation starts here
 xaz = get_transport_tensor(xaz, test_propagation=False, normalize_tracers=False)
 xaz = get_Rij_eigenvalues(xaz, test_propagation=False)
 xaz = reconstruct_buoyancy_fluxes(xaz, test_propagation=False)
-
-#+++ Reconstruct passive tracer fluxes
-if n_inversion_tracers: # Put gradients that weren't used in the inversion back
-    xaz = concat_tracers_back(xaz)
-
-xaz["∇ⱼτ̄ᵅ"] = xaz["∇ⱼτ̄ᵅ"].expand_dims(dim=dict(μ=[1])) # Extra dimension is needed by apply_ufunc, for some reason
-xaz["∇ⱼτ̄ᵅ"] = xaz["∇ⱼτ̄ᵅ"].transpose(..., "j", "μ")
-xaz["⟨uᵢ′τᵅ′⟩ᵣ"] = -xr.apply_ufunc(np.matmul, xaz["Rᵢⱼ"], xaz["∇ⱼτ̄ᵅ"],
-                                   input_core_dims = [["i", "j"], ["j", "μ"]],
-                                   output_core_dims = [["i", "μ"]],
-                                   dask = "parallelized",)
-
-xaz = xaz.squeeze("μ").drop_vars("μ") # Get rid of μ which is no longer needed
-
-#+++ Test
-if test_propagation:
-    print("Test that passive tracer flux reconstruction is done correctly")
-    with ProgressBar():
-        A5 = -xaz["Rᵢⱼ"].isel(time=0, zC=0, xC=0).values @ xaz["∇ⱼτ̄ᵅ"].isel(time=0, zC=0, xC=0).values.T
-        B5 =  xaz["⟨uᵢ′τᵅ′⟩ᵣ"].isel(time=0, zC=0, xC=0)
-        assert np.allclose(A5.T, B5.values), "Buoyancy flux reconstruction isn't correct"
-        print(Fore.GREEN + f"OK")
-        print(Style.RESET_ALL)
-#---
-#---
+xaz = concat_tracers_back(xaz) # Put gradients that weren't used in the inversion back
+xaz = reconstruct_tracer_fluxes(xaz, test_propagation=False)

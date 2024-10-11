@@ -159,3 +159,27 @@ def reconstruct_buoyancy_fluxes(ds, test_propagation=True):
     #---
     return ds
 #---
+
+#+++ Reconstruct passive tracer fluxes
+def reconstruct_tracer_fluxes(ds, test_propagation=True):
+    ds["∇ⱼτ̄ᵅ"] = ds["∇ⱼτ̄ᵅ"].expand_dims(dim=dict(μ=[1])) # Extra dimension is needed by apply_ufunc, for some reason
+    ds["∇ⱼτ̄ᵅ"] = ds["∇ⱼτ̄ᵅ"].transpose(..., "j", "μ")
+    ds["⟨uᵢ′τᵅ′⟩ᵣ"] = -xr.apply_ufunc(np.matmul, ds["Rᵢⱼ"], ds["∇ⱼτ̄ᵅ"],
+                                       input_core_dims = [["i", "j"], ["j", "μ"]],
+                                       output_core_dims = [["i", "μ"]],
+                                       dask = "parallelized",)
+
+    ds = ds.squeeze("μ").drop_vars("μ") # Get rid of μ which is no longer needed
+
+    #+++ Test
+    if test_propagation:
+        print("Test that passive tracer flux reconstruction is done correctly")
+        with ProgressBar():
+            A5 = -ds["Rᵢⱼ"].isel(time=0, zC=0, xC=0).values @ ds["∇ⱼτ̄ᵅ"].isel(time=0, zC=0, xC=0).values.T
+            B5 =  ds["⟨uᵢ′τᵅ′⟩ᵣ"].isel(time=0, zC=0, xC=0)
+            assert np.allclose(A5.T, B5.values), "Buoyancy flux reconstruction isn't correct"
+            print(Fore.GREEN + f"OK")
+            print(Style.RESET_ALL)
+    #---
+    return ds
+#---
