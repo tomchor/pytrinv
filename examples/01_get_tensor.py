@@ -28,13 +28,7 @@ if __name__ == "__main__": print(f"\nGoing to invert tracers in file {filename}\
 xaz = xr.load_dataset(filename, decode_times=False).squeeze()
 #---
 
-#+++ Select relevant times for the analysis
-Δt_inertial_periods = 1/2
-ε = 0.1 # Inertial periods
-xaz = xaz.sel(time=slice(xaz.tracer_restart_time/xaz.T_inertial + ε, xaz.tracer_restart_time/xaz.T_inertial + Δt_inertial_periods))
-#---
-
-#+++ Rename y-averages of b for consistency
+#+++ Rename y-averages of b for name consistency
 xaz = xaz.rename(b_yavg="b̄")
 #---
 
