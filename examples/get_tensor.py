@@ -1,7 +1,6 @@
 import numpy as np
 import xarray as xr
 from natsort import natsorted
-import pynanigans as pn
 from dask.diagnostics import ProgressBar
 
 import sys
